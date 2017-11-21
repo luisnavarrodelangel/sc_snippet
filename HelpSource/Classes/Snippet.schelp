@@ -7,20 +7,44 @@ DESCRIPTION::
 A Snippet tool for quick regeneration of code.
 
 
+
 CLASSMETHODS::
 
 METHOD:: enable
 enable snippet
 
-
 METHOD:: disable
 disable snippet
 
+METHOD:: addSnippet
+add a single snippet
+
+ARGUMENT:: keyValPair
+an association of key(a symbol of snippet) and value(a string of the target code)
+e.g. \px -> "p = ProxySpace(--s.boot--).push;"
+
+
 METHOD:: keys
-get all snippets
+get all existing snippets
+
+
+METHOD:: editDefaults
+open the file of the default snippets
+
+
+METHOD:: addSnippets
+add multiple snippets
+
+ARGUMENT:: keyValPairs
+an array of associations, see .addSnippet
+
 
 METHOD:: keysCodes
-get all snippets and their codes
+get all existing snippets and their codes
+
+METHOD:: isRunning
+a boolean indicating if snippet-mode is enabled
+
 
 
 
@@ -33,7 +57,7 @@ code::
 
 Snippet.enable; //run this first;
 
-1. ndf //press ctrl+l will get the code below;
+1. ndf //double hit the control key will get the code below;
 
 Ndef('foo',{ })
 
@@ -49,6 +73,18 @@ Pdef('foo',Pbind(
 
 //press ctrl+] to jump to 'default', Pseq([0,1,2,3],inf) and Pseq([1],inf);
 
-//
+/////////////////////////////////////////
+
+to enable snippet mode when start up,
+add the following code to the startup.scd:
+Snippet.enable
+
+to open startup.scd:
+Document.open((Platform.userConfigDir +/+ "startup.scd").standardizePath)
+
+
+
+
+
 
 ::

@@ -1,230 +1,240 @@
 Snippet {
 
-	classvar snippetDict, func, changeDefaultsFunc;
-	classvar exists = false;
+	classvar mainFunc, changeDefaultsFunc;
+	classvar <>snippetDict, userSnippetDict;
+	classvar <>autoStart, <>autoSave;
 	classvar tempDocSize = 0;
+	classvar exist = false;
+	classvar snipListView;
+	classvar <>shortcutOrder;
+
+
+	*initClass {
+
+		if(Platform.ideName == "scqt",{
+
+		(Snippet.filenameSymbol.asString.dirname +/+ "snippetSettings.scd").load;
+
+		autoStart ?? {autoStart = true; this.saveSettings};
+
+		if(autoStart,{{this.enable}.defer(2)});
+
+		ShutDown.add({
+			this.saveSettings;
+			if(autoSave,{this.save});
+		});
+		});
+
+	}
 
 	*enable{
-
-		if(exists.not){
-
+		if(exist.not,{
 			var snips;
+			var ctrlDownTime = 0;
 
 			snippetDict = IdentityDictionary(128);
-			snippetDict.addAll([
 
-				//SynthDefs
-
-				\syndf ->
-				"SynthDef('--foo--',{|out=0,freq=440,pan=0,amp=1,gate=1| \n\t-- --\n\tOut.ar(--out--, -- --)\n}).add;",
-
-				\syn ->
-				"--x-- = Synth('--foo--')",
-
-				//Patterns
-				\pdf ->
-				"Pdef('--foo--',Pbind(\n\t'instrument','--default--',\n\t'scale',Scale.--major--,\n\t'degree',--Pseq([0,1,2,3],inf)--,\n\t'amp',--Pseq([0.1],inf)--,\n\t'dur',--Pseq([1],inf)--\n));",
-
-				\pdfp ->
-				"Pdef('--foo--').play",
-
-				\pdfq ->
-				"Pdef('--foo--').quant_(--4--)",
-
-				\pdfs ->
-				"Pdef('--foo--').stop",
-
-				\pbdf ->
-				"Pbindef('--foo--','-- --', -- --)",
-
-				\pseq ->
-				"Pseq([--0, 1, 2, 3--],inf)",
-
-				\pwhite ->
-				"Pwhite(--0, 1--,inf)",
-
-				\prand ->
-				"Prand([--0,1--],inf)",
-
-				//Ndef
-				\ndf ->
-				"Ndef('--foo--',{-- --})",
-
-				\ndfp ->
-				"Ndef('--foo--').play",
-
-				\ndfq ->
-				"Ndef('--foo--').quant_(--4--)",
-
-				\ndfs ->
-				"Ndef('--foo--').stop",
-
-				\ndf0->
-				"Ndef('--foo--')[0] = {-- --};",
-
-				\ndff ->
-				"Ndef('--foo--')[--1--] = '--filter--' -> {|in| -- --};",
+			(Snippet.filenameSymbol.asString.dirname +/+ "snippetsDefaults.scd").load;
 
 
-				//ProxySpace
-				\px ->
-				"p = ProxySpace(--s.boot--).push;",
+			mainFunc = {|doc, char, modifiers, unicode, keycode|
+
+				if(modifiers.isCtrl && unicode==65533 && keycode==0,{
+					var now;
+					now = Main.elapsedTime;
+
+					//double press Control to trigger snippet;
+					if((now-ctrlDownTime < 0.5), {
+
+						var allSnippets, codeFragment = "";
+						var currentPos, snippetSize, thisSnippet, snippetPos, findCode;
+						var start, end;
 
 
-				//control structures
-				\if ->
-				"if(-- --, {\n-- --\n});",
+						//add from document text;
+						if(doc.selectionSize > 0,{
 
-				\ife ->
-				"if(-- --, {\n-- --\n},{\n-- --\n});",
+							var newSnipWindow, screenBounds;
+							var textField, edited=false, label;
+							screenBounds = Window.screenBounds;
 
-				\while ->
-				"while({-- --}, {\n-- --\n});",
+							newSnipWindow = Window("New snippet", Rect(screenBounds.width/2-125,screenBounds.height/2+30,260,60),false, false).alwaysOnTop_(true).background_(Color(1, 1, 1, 0.65)).front;
+							label = StaticText(newSnipWindow, Rect(10, 2, 240, 15)).font_(Font.sansSerif(12).boldVariant).string_("New Snippet: ").stringColor_(Color.black);
+							textField = TextField(newSnipWindow, Rect(10, 20, 240, 30)).string_(" Insert key... (press ESC to cancel)").stringColor_(Color.grey);
 
-				\for ->
-				"for(-- --, -- --, {\n-- --\n});",
+							textField.mouseDownAction_({|view|
+								view.string_("");
+								view.stringColor_(Color.black);
+							});
 
-				\case ->
-				"case\n{-- --}{-- --}\n{-- --}{-- --};",
-
-				\switch ->
-				"switch(-- --,\n-- --,{-- --},\n-- --,{-- --})",
-
-
-				//other
-
-				\egen ->
-				"EnvGen.kr(--Env.adsr--, gate, doneAction:--2--);\n",
-
-				\out ->
-				"Out.ar(--out--, -- --);",
-
-				\oscdf ->
-				"OSCdef('--foo--',{|msg| -- --},'--/path--');",
-
-				\tdf ->
-				"Tdef('--foo--',{-- --})",
-
-				\tempo ->
-				"(\n--t-- = TempoClock.default;\n--t--.tempo = --1--\n)",
-
-				'//' ->
-				"//////////////////////////////////////////////////////////////////////"
-
-			]);
-
-
-
-
-			/////////////
-
-
-			func = {|doc, char, modifiers, unicode, keycode|
-
-				if(unicode == 12 && modifiers.isCtrl, {
-					var allSnippets, codeFragment = "";
-					var currentPos, snippetSize, thisSnippet, snippetPos, findCode;
-					var start, end;
-
-					allSnippets = snippetDict.keys;
-					currentPos = doc.selectionStart;
-
-					findCode = {
-						var pos, thisChar, code="";
-						var lim=7, index=0;
-
-						pos = currentPos;
-						while({
-							thisChar = doc.getChar(pos);
-							((thisChar.ascii[0] == nil) || (thisChar.ascii[0] == 10) || (thisChar.ascii[0] == 32) || (index > lim)).not
-						},{
-							code = code ++ thisChar;
-							pos = pos + 1;
-							index = index + 1;
+							textField.keyDownAction_({|view, char, mod, unicode, keycode|
+								if(edited.not,{edited=true; view.string_("")});
+								switch(unicode,
+									27, {newSnipWindow.close},
+									13, {
+										var isDuplicated, thisKey;
+										thisKey = view.string.asSymbol;
+										isDuplicated = snippetDict.keys.includes(thisKey);
+										if(isDuplicated,{
+											// var askOverwriteWindow,
+											doc.selectedString.addSnippet(view.string.asSymbol);
+										},{
+											doc.selectedString.addSnippet(view.string.asSymbol);
+										});
+										newSnipWindow.close;
+									}
+								)
+							});
 						});
 
-						end = pos - 1;
-						code = code.reverse;
-						pos = currentPos - 1;
-						index = 0;
 
 
-						while({
-							thisChar = doc.getChar(pos);
-							((thisChar.ascii[0] == nil) || (thisChar.ascii[0] == 10) || (thisChar.ascii[0] == 32) || (index > lim)).not
-						},{
-							code = code ++ thisChar;
-							pos = pos - 1;
-							index = index + 1;
-						});
+						if(doc.selectionSize == 0,{
 
-						start = pos + 1;
+							allSnippets = snippetDict.keys;
+							currentPos = doc.selectionStart;
 
-						code = code.reverse;
+							findCode = {
+								var pos, thisChar, code="";
+								var lim=7, index=0;
 
-					};
+								pos = currentPos;
+								while({
+									thisChar = doc.getChar(pos);
+									((thisChar.ascii[0] == nil) || (thisChar.ascii[0] == 10) || (thisChar.ascii[0] == 32) || (index > lim)).not
+								},{
+									code = code ++ thisChar;
+									pos = pos + 1;
+									index = index + 1;
+								});
 
-					codeFragment = findCode.value.toLower;
+								end = pos - 1;
+								code = code.reverse;
+								pos = currentPos - 1;
+								index = 0;
 
-					allSnippets.do{|key|
-						var loc;
-						loc = codeFragment.find(key.asString);
-						if(loc.notNil){
-							if(thisSnippet.isNil){
-								thisSnippet = key;
-								snippetPos = loc;
-							}{
-								if(key.asString.size >= thisSnippet.asString.size){
-									thisSnippet = key;
-									snippetPos = loc;
-								}
-							}
-						}
-					};
 
-					if(snippetPos.notNil){
+								while({
+									thisChar = doc.getChar(pos);
+									((thisChar.ascii[0] == nil) || (thisChar.ascii[0] == 10) || (thisChar.ascii[0] == 32) || (index > lim)).not
+								},{
+									code = code ++ thisChar;
+									pos = pos - 1;
+									index = index + 1;
+								});
 
-						var thisCode, removedDashesCode, jumpTo=10;
+								start = pos + 1;
 
-						thisCode = snippetDict[thisSnippet];
-						removedDashesCode = thisCode.replace("--", "");
+								code = code.reverse;
 
-						currentPos = start + snippetPos;
-						snippetSize = thisSnippet.asString.size;
-						doc.selectRange(currentPos,snippetSize);
-						doc.selectedString = removedDashesCode;
-
-						if(thisCode.contains("--"),{
-							var poss;
-							poss = thisCode.findAll("--").clump(2);
-							poss = poss.collect{|j,i|
-								var beginPos, endPos, length;
-								beginPos = j[0]-(i*4);
-								endPos = beginPos + (j[1]-j[0]) - 2;
-								length = endPos-beginPos;
-								[beginPos + currentPos, length];
 							};
 
-							tempDocSize = doc.string.size;
-							doc.selectRange(poss[0][0], poss[0][1]);
-							changeDefaultsFunc.value(currentPos, removedDashesCode.size + currentPos - 1, poss);
+							codeFragment = findCode.value.toLower;
+
+							allSnippets.do{|key|
+								var loc;
+								loc = codeFragment.find(key.asString);
+								if(loc.notNil){
+									if(thisSnippet.isNil){
+										thisSnippet = key;
+										snippetPos = loc;
+									}{
+										if(key.asString.size >= thisSnippet.asString.size){
+											thisSnippet = key;
+											snippetPos = loc;
+										}
+									}
+								}
+							};
+
+							if(snippetPos.notNil){
+								var thisCode, removedDashesCode, jumpTo=10;
+
+								thisCode = snippetDict[thisSnippet];
+								removedDashesCode = thisCode.replace("$$", "");
+
+								currentPos = start + snippetPos;
+								snippetSize = thisSnippet.asString.size;
+								doc.selectRange(currentPos,snippetSize);
+								doc.selectedString = removedDashesCode;
+
+								if(thisCode.contains("$$"),{
+									var poss;
+									poss = thisCode.findAll("$$").clump(2);
+									poss = poss.collect{|j,i|
+										var beginPos, endPos, length;
+										beginPos = j[0]-(i*4);
+										endPos = beginPos + (j[1]-j[0]) - 2;
+										length = endPos-beginPos;
+										[beginPos + currentPos, length];
+									};
+
+									tempDocSize = doc.string.size;
+									doc.selectRange(poss[0][0], poss[0][1]);
+									changeDefaultsFunc.value(currentPos, removedDashesCode.size + currentPos - 1, poss);
+								});
+							};
 						});
-
-
-
-
-
-					};
+					});
+					ctrlDownTime=now;
 				});
 
+
 				//code shortcuts
-				if(modifiers.isCmd){
-					switch(keycode)
-					{18}
-					{doc.selectedString = snippetDict[\px]}
-					{19}
-					{doc.selectedString = (snippetDict[\sin] ++ "\n" ++ snippetDict[\sout] ++ "\n" ++ snippetDict[\snout])}
-				};
+				if(modifiers.isCmd,{
+
+					var keycodeOrder, which;
+					keycodeOrder = [18, 19, 20, 21, 23, 22, 26, 28, 25];
+					if(keycodeOrder.includes(keycode),{
+						which = shortcutOrder[keycodeOrder.indexOf(keycode)];
+						which !? {doc.selectedString = snippetDict[which].replace("$$", "")++"\n"};
+					});
+				});
+
+
+				//auto paranthesis;
+				if(modifiers.isCtrl && modifiers.isShift && keycode == 25,{
+					var pos, string, startPos, endPos;
+					pos = doc.selectionStart;
+					string = doc.string;
+					startPos = (string.copyFromStart(pos).reverse.find("\n\n\n"));
+					if(startPos.notNil,{
+						startPos = pos - startPos;
+						doc.selectRange(startPos, 0);
+						if(string[startPos+1] != $(,{doc.selectedString = "("});
+					},{
+						doc.selectRange(0, 0);
+						doc.selectedString = ("(\n");
+					});
+
+					endPos = string.copyToEnd(pos).find("\n\n");
+					if(endPos.notNil,{
+						endPos = endPos + pos;
+						doc.selectRange(endPos + 2,0);
+						doc.selectedString = ")";
+					},{
+						doc.selectRange(string.size+1,0);
+						doc.selectedString = "\n)";
+					})
+
+				});
+
+
+				//auto variables fill;
+				//press ctrl+shift+v after variable declaration;
+				if(modifiers.isCtrl && modifiers.isShift && unicode == 22,{
+					var str, strSize;
+					str = doc.string.copyFromStart(doc.selectionStart).reverse;
+					strSize = str.find("{");
+					str = str.copyFromStart(strSize).reverse;
+					str = str.copyToEnd(str.find("var"));
+					["{", "\n", "var", " ", "\t"].do{|find| str = str.replace(find, "")};
+					str = str.replace(";",",");
+					str = str.replace(","," = \n\t");
+					doc.selectedString = str;
+					doc.selectRange(doc.selectionStart + str.find(" = ") + 3,0);
+				})
+
 			};
 
 
@@ -235,11 +245,11 @@ Snippet {
 					var pos = doc.selectionStart;
 
 					if((pos < snipStart) || (pos > snipEnd),{
-
 						Document.globalKeyDownAction = Document.globalKeyDownAction.removeFunc(keyJumpFunc);
 						doc.mouseDownAction = doc.mouseDownAction.removeFunc(mouseJumpFunc);
 					})
 				};
+
 				keyJumpFunc = {|doc, char, modifiers, unicode, keycode|
 					var pos = doc.selectionStart;
 					if((pos >= snipStart) && (pos <= snipEnd),{
@@ -273,23 +283,162 @@ Snippet {
 			};
 
 
-			Document.globalKeyDownAction = Document.globalKeyDownAction.addFunc(func);
-			exists = true;
+			Document.globalKeyDownAction = Document.globalKeyDownAction.addFunc(mainFunc);
+			exist = true;
 			"Snippet mode enabled".postln;
 
 		};
-
+		);
 
 	}
 
 
 	*disable {
-		if(exists == true){
-			Document.globalKeyDownAction.removeFunc(func);
-			exists = false;
+		if(exist == true){
+			Document.globalKeyDownAction.removeFunc(mainFunc);
+			exist = false;
 		}
 	}
 
+
+	*saveSettings {
+		var file;
+		file = File(Snippet.filenameSymbol.asString.dirname +/+ "snippetSettings.scd", "w");
+		file.put("//Snippet setup file\n\n");
+		file.put("Snippet.autoStart = %;\n".format(autoStart.asString));
+		file.put("Snippet.autoSave = %;\n".format(autoSave !? autoSave.asString ?? true));
+		file.close
+	}
+
+
+	*gui {
+		var window, codeView;
+		var labelKeys, labelCodes;
+
+		window = Window("snippet list", Rect(Window.screenBounds.width/15, Window.screenBounds.height/2 -150, 300, 335), false, true).front;
+		window.background_(Color(0.7, 0.7, 0.7, 1));
+		window.alwaysOnTop = true;
+		window.layout = VLayout(
+			labelKeys = StaticText(),
+			snipListView = ListView(),
+			labelCodes = StaticText(),
+			codeView = TextView()
+		);
+
+		window.view.keyDownAction_({|view, char, mod, unicode, keycode|
+			if(keycode == 53,{window.close;});
+		});
+
+		labelKeys.string_("Snippet Keys: ").font_(Font.sansSerif(12).boldVariant);
+		labelCodes.string_("Code: ").font_(Font.sansSerif(12).boldVariant);
+		snipListView.items_(snippetDict.keys.asArray.sort.collect{|j| j.asString})
+		.selectionMode_(\single)
+		.minHeight_(window.bounds.height/3*1.3)
+		.maxHeight_(window.bounds.height/3*1.3)
+		.action_({|view| codeView.string_(snippetDict[view.items[view.value].asSymbol])})
+		.enterKeyAction_({|view|
+			var str;
+			str = snippetDict[view.items[view.value].asSymbol];
+			Document.current.selectedString = (str.replace("$$", "") ++ "\n");
+		});
+
+		codeView.enterInterpretsSelection = true;
+		codeView.minHeight_(window.bounds.height/3);
+		codeView.maxHeight_(window.bounds.height/3);
+		codeView.mouseDownAction_({|view| view.string = view.string.replace("$$", "")});
+
+	}
+
+	*updateGui {
+		snipListView !? {snipListView.items_(snippetDict.keys.asArray.sort.collect{|j| j.asString})};
+	}
+
+
+	*save {
+		if(userSnippetDict.notNil,{
+			if(userSnippetDict.notEmpty,{
+				var oldFile, newFile;
+				var oldStr, newStr, newStrKeyValues="";
+				var docIsOpened=false, defaultDocIndex;
+				oldFile = File(Snippet.filenameSymbol.asString.dirname +/+ "snippetsDefaults.scd", "r");
+				oldStr = oldFile.readAllString;
+				oldFile.close;
+
+				defaultDocIndex = Document.allDocuments.collect{|doc| doc.title}.detectIndex{|title| title == "snippetsDefaults.scd"};
+				if(defaultDocIndex.notNil,{Document.allDocuments[defaultDocIndex].close});
+
+				newFile = File(Snippet.filenameSymbol.asString.dirname +/+ "snippetsDefaults.scd", "w");
+				newStr = "\nSnippet.addSnippets([\n\n%]);";
+				userSnippetDict.keys.do{|key|
+					newStrKeyValues = newStrKeyValues ++ "'%' -> \n".format(key.asString) ++ userSnippetDict[key].replace("\"", "\\\"").quote ++ ",\n\n"};
+
+				newStr = newStr.format(newStrKeyValues);
+				newFile.put(oldStr ++ "\n\n//Added on %".format(Date.gmtime.asString) ++ newStr);
+				newFile.close;
+				"New snippets are saved sucessfully".postln;
+				userSnippetDict = IdentityDictionary(24);
+				this.updateGui;
+
+			});
+		});
+	}
+
+
+
+	*removeSnippet{|key, removeFromFile=false|
+		snippetDict.removeAt(key);
+		if(removeFromFile,{
+			var oldFile, rmStart, rmEnd, str;
+			var newFile;
+			oldFile = File(Snippet.filenameSymbol.asString.dirname +/+ "snippetsDefaults.scd", "r");
+			str = oldFile.readAllString;
+			rmStart = str.find(key.asString);
+			rmStart = str[0..rmStart].findBackwards("\n");
+			rmEnd = str.copyToEnd(rmStart+1).find("\n\n");
+			rmEnd !? {rmEnd = rmEnd + rmStart + 4} ?? {"Key not found!".error};
+			str = str[0..rmStart] ++ str.copyToEnd(rmEnd);
+			oldFile.close;
+			newFile = File(Snippet.filenameSymbol.asString.dirname +/+ "snippetsDefaults.scd", "w");
+			newFile.put(str);
+			newFile.close;
+			this.updateGui;
+		});
+	}
+
+
+
+	//add a single snippet
+	*addSnippet{|keyValPair|
+		if(keyValPair.isKindOf(Association),{
+			if(keyValPair.key.class == Symbol && keyValPair.value.class == String,{
+				if(snippetDict.includesKey(keyValPair.key).not,{
+					snippetDict.add(keyValPair);
+					userSnippetDict ?? {userSnippetDict = IdentityDictionary(24)};
+					if(exist,{userSnippetDict.add(keyValPair)});
+					this.updateGui;
+				});
+			},{"Argument is not valid.".error;});
+		},{"Argument is not an Association.".error;})
+	}
+
+	//add an Array of Snippets (associations of key(symbol) to value(string of code))
+	*addSnippets{|keyValPairs|
+		if(keyValPairs.class != Array,{
+			"Argument must be an array".error
+		},{
+			keyValPairs.do{|pair| this.addSnippet(pair)};
+		})
+	}
+
+
+	*edit{
+		Document.open(Snippet.filenameSymbol.asString.dirname ++ "/snippetsDefaults.scd");
+	}
+
+
+	*settings {
+		Document.open(Snippet.filenameSymbol.asString.dirname ++ "/snippetSettings.scd");
+	}
 
 
 	*keys {
@@ -298,44 +447,45 @@ Snippet {
 	}
 
 
-	*keysCodes {
-		^snippetDict;
+	*list {
+		var maxSize;
+		maxSize = snippetDict.keys.asArray.collect{|key| key.asString.size}.maxItem;
+		snippetDict.keys.asArray.sort.do{|key| Post << key.asString.padLeft(maxSize, " ") << " -> " << snippetDict[key].replace("\n", "")[0..50] << "..." << Char.nl;};
+		userSnippetDict.keys.asArray.sort.do{|key| Post << key.asString.padLeft(maxSize, " ") << " -> " << snippetDict[key].replace("\n", "")[0..50] << "..." << Char.nl;};
 	}
 
-	*isRunning {
-		^exists;
+
+
+	*search {|keyword|
+		var returnKeys;
+		returnKeys = Set(28);
+		snippetDict.valuesKeysDo{|val, key| if(val.toLower[0..20].find(keyword.toLower).notNil || key.asString.toLower.find(keyword.toLower).notNil,{returnKeys.add(key)})};
+		returnKeys.asArray.sort.do{|key|
+			var code;
+			code = snippetDict[key].replace("\n", "");
+			Post << key.asString.padLeft(8) << " -> " << code.[0..50].cs << if(code.size > 50,{"..."}) << Char.nl};
+		^returnKeys;
 	}
 
+
+	*isEnabled {
+		^exist;
+	}
 
 }
 
 
+/////////////////////////////////////////////////////////////////////////
+
++ Symbol {
+	addSnippet {|code|
+		Snippet.addSnippet(Association(this, code.asString));
+	}
+}
 
 
-
-/////
-
-//
-//
-// (//strip
-// f = {|string|
-// 	var startPos, defaultAry, defaultVal;
-// 	startPos = string.findAll("$$");
-// 	defaultAry = Array.new(12);
-// 	startPos.do{|i|
-// 		var pos=i, str="";
-// 		while({
-// 			a[pos-1] != $}
-// 			},{
-// 				pos = pos + 1;
-// 				str = str ++ a[pos-1]
-// 		});
-// 		defaultAry.add(str);
-// 	};
-// 	defaultVal = defaultAry.collect{|defaultStr| defaultStr.copyToEnd(5).drop(-1)};
-// 	[startPos, defaultAry, defaultVal,  defaultAry.collect{|j| j.size}].postln;
-// 	defaultAry.do{|str,i| string = string.replace(str,defaultVal[i])};
-// 	string.postln;
-// }
-// )
-//
++ String {
+	addSnippet {|key|
+		Snippet.addSnippet(Association(key.asSymbol,this));
+	}
+}

@@ -6,9 +6,26 @@ An auto completion tool for quick filling-in default and user-defined values for
 Optimized for UGens, may work with other classes, but not recommanded.
 
 */
+
 AutoArgs {
 
 	classvar func, exists=false;
+	classvar <>autoStart;
+
+	*initClass {
+
+		if(Platform.ideName == "scqt",{
+		(AutoArgs.filenameSymbol.asString.dirname +/+ "autoArgsSettings.scd").load;
+
+		autoStart ?? {autoStart = true; this.saveSettings};
+
+		if(autoStart,{{this.enable}.defer(2)});
+
+		ShutDown.add({this.saveSettings;})
+
+		});
+
+	}
 
 	*enable{
 
@@ -98,7 +115,6 @@ AutoArgs {
 										string = "";
 									}
 								};
-
 								if(string.notEmpty){codeArray.add(string.replace(" ",""))};
 								codeArray;
 							};
@@ -184,15 +200,18 @@ AutoArgs {
 								{11}
 								{
 									if(isUGen){
-										if(value.isString.not){
-											argString = argString ++ "\\" ++ "%.kr(%), ".format(argName, value ? 0);
-										}{
-											argString = argString ++ "%, ".format(value ? 0);
-										};
+										if(value.isString.not,{
+											if(modifiers.isShift,{
+												argString = argString ++ "\\" ++ "%.kr(%), ".format(argName, value ? nil)},{
+												argString = argString ++ "%: %, ".format(argName, value ? nil)},{
+											})
+										},{
+											argString = argString ++ "%, ".format(value ? nil);
+										});
 									}
 								}
 								{10}
-								{argString = argString ++ "%, ".format(value ? 0)}
+								{argString = argString ++ "%, ".format(value ? nil)}
 							});
 
 
@@ -203,16 +222,61 @@ AutoArgs {
 						}{
 							"Target not found".error;
 						}
-				},)
+				},);
+
+				//auto fill ".set"
+				if(unicode == 19 && modifiers.isCtrl,{
+					var start, pos = 0, thisChar;
+					var string="", tempString="", target = "", targetClass;
+					var keysValues;
+					start = doc.selectionStart;
+					3.do{|i| tempString = tempString ++ doc.getChar(start-1-i)};
+					if(tempString == "tes",{
+						if(doc.getChar(start-4)!=".",
+							{"Syntax error".error},
+							{
+								pos = start-5;
+								while({
+									thisChar = doc.getChar(pos);
+									((thisChar.ascii[0] == nil) || (thisChar.ascii[0] == 10) || (thisChar.ascii[0] == 32)).not
+								},{
+									target = target ++ thisChar;
+									pos = pos - 1;
+								});
+								target = target.reverse;
+								targetClass = target.interpret.class;
+								if(((targetClass == NodeProxy) || (targetClass == Ndef)),{
+
+									keysValues = target.interpret.controlKeysValues;
+									if(keysValues.size > 0,{
+									(keysValues.size/2).do({|i|
+										string = string ++ target ++ ".set('" ++ keysValues[i*2] ++ "', " ++ keysValues[i*2+1].asString ++ ");\n"
+									});
+									doc.selectRange(start-(target.size+4), target.size+4);
+									doc.selectedString = string;
+									});
+								},{"Target not supported".error});
+						});
+					});
+				});
 			};
-
-
 			Document.globalKeyDownAction = Document.globalKeyDownAction.addFunc(func);
 			exists = true;
 			"AutoArgs mode enabled".postln;
 		}
 
 	}
+
+
+	*saveSettings {
+		var file;
+		file = File(Snippet.filenameSymbol.asString.dirname +/+ "autoArgsSettings.scd", "w");
+		file.put("//AutoArgs settings file\n\n");
+		file.put("AutoArgs.autoStart = %;\n".format(autoStart.asString));
+		file.close
+	}
+
+
 
 	*disable {
 		if(exists == true){
